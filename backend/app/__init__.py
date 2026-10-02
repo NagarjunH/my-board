@@ -49,4 +49,26 @@ def create_app(test_config=None):
         from app.services.seed_service import seed_database_if_empty
         seed_database_if_empty(db_session)
 
+    # Serve static frontend SPA build if available
+    import os
+    from flask import send_from_directory
+    frontend_dist = os.getenv("STATIC_FOLDER")
+    if not frontend_dist:
+        candidates = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static")),
+        ]
+        for c in candidates:
+            if os.path.isdir(c):
+                frontend_dist = c
+                break
+
+    if frontend_dist and os.path.isdir(frontend_dist):
+        @app.route("/", defaults={"path": ""})
+        @app.route("/<path:path>")
+        def serve_frontend(path):
+            if path and os.path.exists(os.path.join(frontend_dist, path)):
+                return send_from_directory(frontend_dist, path)
+            return send_from_directory(frontend_dist, "index.html")
+
     return app
