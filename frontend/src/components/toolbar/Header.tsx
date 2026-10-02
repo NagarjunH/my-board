@@ -35,6 +35,8 @@ export const Header: React.FC = () => {
   const toggleYouTubeMode = useUIStore((s) => s.toggleYouTubeMode);
   const setShareModalOpen = useUIStore((s) => s.setShareModalOpen);
   const setExportModalOpen = useUIStore((s) => s.setExportModalOpen);
+  const isPresenterNotesOpen = useUIStore((s) => s.isPresenterNotesOpen);
+  const togglePresenterNotes = useUIStore((s) => s.togglePresenterNotes);
   const theme = useUIStore((s) => s.theme);
   const toggleTheme = useUIStore((s) => s.toggleTheme);
 
@@ -307,6 +309,21 @@ export const Header: React.FC = () => {
           ) : (
             <Moon className="w-4 h-4 text-slate-600" />
           )}
+        </button>
+
+        {/* Teacher Script / Teleprompter Toggle */}
+        <button
+          onClick={togglePresenterNotes}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl shadow-2xs border transition-all hover:scale-[1.02] active:scale-95 ${
+            isPresenterNotesOpen
+              ? 'bg-[#10B981] border-[#059669] text-white shadow-emerald-500/20'
+              : 'bg-white dark:bg-slate-900 border-[#EAE5DC] dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-[#FAF8F5] dark:hover:bg-slate-800'
+          }`}
+          title="Teacher Script & Auto-Scroll Teleprompter (Alt+S)"
+        >
+          <FileText className={`w-3.5 h-3.5 ${isPresenterNotesOpen ? 'text-white' : 'text-emerald-500 dark:text-emerald-400'}`} />
+          <span>Script</span>
+          <span className="text-[10px] font-mono opacity-60">Alt+S</span>
         </button>
 
         {/* YouTube Mode Button */}

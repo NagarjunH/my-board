@@ -8,6 +8,7 @@ export function useKeyboardShortcuts() {
   const redo = useCanvasStore((s) => s.redo);
   const deleteSelectedElements = useCanvasStore((s) => s.deleteSelectedElements);
   const toggleYouTubeMode = useUIStore((s) => s.toggleYouTubeMode);
+  const togglePresenterNotes = useUIStore((s) => s.togglePresenterNotes);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -19,6 +20,13 @@ export function useKeyboardShortcuts() {
         target.isContentEditable ||
         target.closest('[contenteditable="true"]')
       ) {
+        return;
+      }
+
+      // Alt + S or Alt + N: Toggle Teacher Script & Teleprompter HUD
+      if (e.altKey && (e.key === 's' || e.key === 'S' || e.key === 'n' || e.key === 'N')) {
+        e.preventDefault();
+        togglePresenterNotes();
         return;
       }
 
@@ -97,5 +105,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setActiveTool, undo, redo, deleteSelectedElements, toggleYouTubeMode]);
+  }, [setActiveTool, undo, redo, deleteSelectedElements, toggleYouTubeMode, togglePresenterNotes]);
 }

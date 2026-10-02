@@ -13,6 +13,7 @@ import {
   Minimize2,
   Trash2,
   Sliders,
+  FileText,
 } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useUIStore } from '../../store/uiStore';
@@ -71,6 +72,8 @@ const HIGHLIGHTER_PRESETS = [16, 28, 48, 72, 100];
 export const YouTubeFloatingToolbar: React.FC = () => {
   const isYouTubeMode = useUIStore((s) => s.isYouTubeMode);
   const toggleYouTubeMode = useUIStore((s) => s.toggleYouTubeMode);
+  const isPresenterNotesOpen = useUIStore((s) => s.isPresenterNotesOpen);
+  const togglePresenterNotes = useUIStore((s) => s.togglePresenterNotes);
 
   // Canvas Store
   const activeTool = useCanvasStore((s) => s.activeTool);
@@ -357,8 +360,21 @@ export const YouTubeFloatingToolbar: React.FC = () => {
       {/* Divider */}
       <div className="w-6 h-px bg-slate-700/80 my-0.5" />
 
-      {/* 5. Window / Fullscreen / Exit Actions */}
+      {/* 5. Window / Fullscreen / Script / Exit Actions */}
       <div className="flex flex-col items-center gap-1">
+        {/* Teacher Script / Teleprompter Toggle */}
+        <button
+          onClick={togglePresenterNotes}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+            isPresenterNotesOpen
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold scale-105 ring-1 ring-emerald-400'
+              : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+          }`}
+          title="Teacher Script & Auto-Scroll Teleprompter (Alt+S)"
+        >
+          <FileText className="w-4 h-4" />
+        </button>
+
         {/* Toggle Fullscreen / Clean Borderless Window */}
         <button
           onClick={toggleFullscreen}
