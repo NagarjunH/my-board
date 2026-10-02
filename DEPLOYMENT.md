@@ -19,16 +19,11 @@ This guide walks you through deploying the complete **MyBoard** full-stack web a
 
 Render provides a unified dashboard that hosts the Frontend, Backend, and PostgreSQL database together under one blueprint.
 
-### Step 1: Push Code to GitHub
-1. Create a new GitHub repository (e.g., `myboard`).
-2. Push this project to GitHub:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit of MyBoard"
-   git remote add origin https://github.com/<your-username>/myboard.git
-   git push -u origin main
-   ```
+### Step 1: Code Repository (Already Pushed)
+Your repository is already pushed and live at:
+**[https://github.com/NagarjunH/my-board.git](https://github.com/NagarjunH/my-board.git)**
+Branch: `main`
+
 
 ### Step 2: Deploy on Render
 1. Go to [render.com](https://render.com) and sign up for a free account.
