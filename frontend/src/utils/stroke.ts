@@ -2,9 +2,10 @@ import { getStroke } from 'perfect-freehand';
 import { Point } from '../types/canvas';
 
 /**
- * Filters out microscopic jitter and micro-tremors from pen tablets / stylus.
+ * Filters out microscopic sensor noise and micro-tremors from pen tablets / stylus,
+ * while preserving every subtle curve and loop of natural handwriting.
  */
-export function smoothPoints(points: Point[], minDistance: number = 1.2): Point[] {
+export function smoothPoints(points: Point[], minDistance: number = 0.5): Point[] {
   if (points.length <= 2) return points;
   const result: Point[] = [points[0]];
   for (let i = 1; i < points.length; i++) {
@@ -23,6 +24,10 @@ export function smoothPoints(points: Point[], minDistance: number = 1.2): Point[
  */
 export function getSvgPathFromStroke(stroke: number[][]): string {
   if (!stroke.length) return '';
+  if (stroke.length === 1) {
+    const [x, y] = stroke[0];
+    return `M ${x} ${y} Z`;
+  }
 
   const d = stroke.reduce(
     (acc, [x0, y0], i, arr) => {
@@ -43,10 +48,9 @@ export function getSvgPathFromStroke(stroke: number[][]): string {
  * without needing to press the stylus hard.
  */
 function normalizePressure(rawPressure?: number): number {
-  if (rawPressure === undefined || rawPressure === null) return 0.65;
-  if (rawPressure <= 0) return 0.55;
-  // Ergonomic curve: baseline of 0.42 + smooth sqrt curve
-  return Math.min(Math.max(0.42 + Math.sqrt(rawPressure) * 0.58, 0.42), 1.0);
+  if (rawPressure === undefined || rawPressure === null || rawPressure === 0) return 0.55;
+  // Ergonomic curve: baseline of 0.48 + smooth sqrt curve for consistent handwriting
+  return Math.min(Math.max(0.48 + Math.sqrt(rawPressure) * 0.52, 0.48), 1.0);
 }
 
 /**
@@ -57,38 +61,37 @@ function normalizePressure(rawPressure?: number): number {
 export function renderPenStroke(
   points: Point[],
   size: number = 4,
-  thinning: number = 0.15,
-  smoothing: number = 0.55,
-  streamline: number = 0.35
+  thinning: number = 0.08,
+  smoothing: number = 0.65,
+  streamline: number = 0.18
 ): string {
   if (points.length === 0) return '';
 
   // 1. Single point tap
   if (points.length === 1) {
     const p = points[0];
-    const r = Math.max(size * 0.55, 1.8);
+    const r = Math.max(size * 0.5, 1.8);
     return `M ${p.x - r} ${p.y} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 -${r * 2} 0`;
   }
 
   // 2. Full Stop / Dot / Short tap detection:
   // When tapping lightly with a stylus or mouse to place a dot (.),
-  // hardware registers 2 to 4 micro-events spanning < 4px.
-  // We compute total trajectory distance:
+  // hardware registers 2 to 4 micro-events spanning < 6px.
   let totalDistance = 0;
   for (let i = 1; i < points.length; i++) {
     totalDistance += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
 
-  const tapThreshold = Math.max(size * 0.85, 4.5);
-  if (totalDistance < tapThreshold || (points.length <= 2 && totalDistance < 6.0)) {
+  const tapThreshold = Math.max(size * 0.9, 5.0);
+  if (totalDistance < tapThreshold || (points.length <= 4 && totalDistance < 7.0)) {
     // Render clean, crisp round dot at the centroid
     const cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
     const cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
-    const r = Math.max(size * 0.55, 1.8);
+    const r = Math.max(size * 0.5, 1.8);
     return `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 -${r * 2} 0`;
   }
 
-  const filtered = smoothPoints(points, 1.0);
+  const filtered = smoothPoints(points, 0.5);
   const strokePoints = filtered.map((p) => [p.x, p.y, normalizePressure(p.pressure)]);
   const stroke = getStroke(strokePoints, {
     size,
@@ -97,11 +100,11 @@ export function renderPenStroke(
     streamline,
     easing: (t) => Math.sin((t * Math.PI) / 2),
     start: {
-      taper: Math.min(size * 0.08, 0.6),
+      taper: Math.min(size * 0.05, 0.4),
       cap: true,
     },
     end: {
-      taper: Math.min(size * 0.08, 0.6),
+      taper: Math.min(size * 0.05, 0.4),
       cap: true,
     },
   });
@@ -133,13 +136,13 @@ export function renderHighlighterStroke(points: Point[], size: number = 28): str
     return `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 -${r * 2} 0`;
   }
 
-  const filtered = smoothPoints(points, 1.5);
+  const filtered = smoothPoints(points, 0.8);
   const strokePoints = filtered.map((p) => [p.x, p.y, 0.5]);
   const stroke = getStroke(strokePoints, {
     size,
     thinning: 0,
     smoothing: 0.75,
-    streamline: 0.5,
+    streamline: 0.25,
     simulatePressure: false,
     start: { taper: 0, cap: true },
     end: { taper: 0, cap: true },
@@ -147,5 +150,3 @@ export function renderHighlighterStroke(points: Point[], size: number = 28): str
 
   return getSvgPathFromStroke(stroke);
 }
-
-

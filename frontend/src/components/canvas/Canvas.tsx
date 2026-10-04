@@ -64,8 +64,14 @@ export const Canvas: React.FC = () => {
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [elementStartPos, setElementStartPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Draft drawing state
-  const [draftPoints, setDraftPoints] = useState<Point[]>([]);
+  // Stylus Palm Rejection & Active Pointer Tracking
+  const activePointerIdRef = useRef<number | null>(null);
+  const lastPenTimeRef = useRef<number>(0);
+
+  // High-performance draft path refs for zero-latency 120fps handwriting
+  const draftPointsRef = useRef<Point[]>([]);
+  const draftPathRef = useRef<SVGPathElement>(null);
+
   const [shapeStartPoint, setShapeStartPoint] = useState<Point | null>(null);
   const [shapeCurrentPoint, setShapeCurrentPoint] = useState<Point | null>(null);
   const [eraserHoverPos, setEraserHoverPos] = useState<Point | null>(null);
@@ -156,9 +162,30 @@ export const Canvas: React.FC = () => {
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Prevent default browser touch/stylus gestures (such as browser exit-fullscreen cross bubble)
+    // Prevent default browser touch/stylus gestures
     if (e.pointerType === 'pen' || e.pointerType === 'touch') {
       e.preventDefault();
+    }
+
+    if (e.pointerType === 'pen') {
+      lastPenTimeRef.current = Date.now();
+    }
+
+    // 1. Palm Rejection: If an active pointer is already drawing, reject any secondary contact (palm touch)
+    if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) {
+      e.preventDefault();
+      return;
+    }
+
+    // 2. Stylus Priority Palm Rejection:
+    // When using a stylus, the palm constantly rests on screen. Reject touch contacts within 1500ms of pen activity or large palm patches.
+    if (e.pointerType === 'touch') {
+      const isPenRecentlyActive = Date.now() - lastPenTimeRef.current < 1500;
+      const isPalmSurface = (e.width && e.width > 22) || (e.height && e.height > 22);
+      if ((isPenRecentlyActive || isPalmSurface) && (activeTool === 'pen' || activeTool === 'highlighter')) {
+        e.preventDefault();
+        return;
+      }
     }
 
     // Only handle primary button or middle button (pan)
@@ -169,7 +196,7 @@ export const Canvas: React.FC = () => {
     }
 
     const worldPoint = screenToWorld(e.clientX, e.clientY);
-    worldPoint.pressure = e.pressure !== 0 ? e.pressure : 0.5;
+    worldPoint.pressure = e.pressure !== 0 ? e.pressure : 0.55;
 
     // Stylus hardware eraser detection (buttons === 32 or button === 5) or Eraser tool
     const isHardwareEraser =
@@ -177,7 +204,8 @@ export const Canvas: React.FC = () => {
       activeTool === 'eraser';
 
     if (isHardwareEraser) {
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      activePointerIdRef.current = e.pointerId;
+      containerRef.current?.setPointerCapture?.(e.pointerId);
       setIsPointerDown(true);
       setEraserHoverPos(worldPoint);
       eraseAtPoint(worldPoint);
@@ -186,7 +214,8 @@ export const Canvas: React.FC = () => {
 
     if (e.button !== 0) return;
 
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    activePointerIdRef.current = e.pointerId;
+    containerRef.current?.setPointerCapture?.(e.pointerId);
     setIsPointerDown(true);
 
     // Text Tool
@@ -211,7 +240,16 @@ export const Canvas: React.FC = () => {
 
     // Freehand Drawing (Pen, Smart Shapes, or Highlighter)
     if (activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter') {
-      setDraftPoints([worldPoint]);
+      draftPointsRef.current = [worldPoint];
+      const isHighlighter = activeTool === 'highlighter';
+      const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
+      const initialPath = isHighlighter
+        ? renderHighlighterStroke([worldPoint], strokeSize)
+        : renderPenStroke([worldPoint], strokeSize);
+
+      if (draftPathRef.current) {
+        draftPathRef.current.setAttribute('d', initialPath);
+      }
       return;
     }
 
@@ -235,7 +273,6 @@ export const Canvas: React.FC = () => {
 
     // Select Tool
     if (activeTool === 'select') {
-      // Find top-most hit element
       const hit = [...elements].reverse().find((el) => {
         const bounds = getElementBounds(el);
         return isPointInsideBounds(worldPoint, bounds, 8);
@@ -258,6 +295,15 @@ export const Canvas: React.FC = () => {
       e.preventDefault();
     }
 
+    if (e.pointerType === 'pen') {
+      lastPenTimeRef.current = Date.now();
+    }
+
+    // Palm Rejection: Ignore events from non-active pointers (like palm shifting while pen writes)
+    if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
+      return;
+    }
+
     // Panning
     if (isPanning && dragStartPoint) {
       const dx = e.clientX - dragStartPoint.x;
@@ -272,7 +318,7 @@ export const Canvas: React.FC = () => {
     }
 
     const worldPoint = screenToWorld(e.clientX, e.clientY);
-    worldPoint.pressure = e.pressure !== 0 ? e.pressure : 0.5;
+    worldPoint.pressure = e.pressure !== 0 ? e.pressure : 0.55;
 
     // Track on-screen eraser ring position
     if (activeTool === 'eraser') {
@@ -293,21 +339,28 @@ export const Canvas: React.FC = () => {
 
     if (!isPointerDown) return;
 
-    // Freehand drawing points with sub-frame tablet precision (Pen, Smart Shapes, Highlighter)
+    // Freehand drawing with zero-latency sub-millisecond tablet tracking
     if (activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter') {
       const nativeEvent = e.nativeEvent as any;
       const rawEvents = (nativeEvent && typeof nativeEvent.getCoalescedEvents === 'function')
         ? nativeEvent.getCoalescedEvents()
         : [e];
 
-      const newPoints: Point[] = [];
       for (const ev of rawEvents) {
         const pt = screenToWorld(ev.clientX, ev.clientY);
-        pt.pressure = ev.pressure !== 0 ? ev.pressure : 0.5;
-        newPoints.push(pt);
+        pt.pressure = ev.pressure !== 0 ? ev.pressure : 0.55;
+        draftPointsRef.current.push(pt);
       }
 
-      setDraftPoints((prev) => [...prev, ...newPoints]);
+      const isHighlighter = activeTool === 'highlighter';
+      const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
+      const updatedPath = isHighlighter
+        ? renderHighlighterStroke(draftPointsRef.current, strokeSize)
+        : renderPenStroke(draftPointsRef.current, strokeSize);
+
+      if (draftPathRef.current) {
+        draftPathRef.current.setAttribute('d', updatedPath);
+      }
       return;
     }
 
@@ -339,19 +392,39 @@ export const Canvas: React.FC = () => {
 
   // Pointer Up
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (isPanning) {
-      setIsPanning(false);
-      setDragStartPoint(null);
+    // Palm Rejection: If secondary pointer (like palm lifting while pen is still down) fires, ignore
+    if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
       return;
     }
 
-    if (!isPointerDown) return;
+    if (isPanning) {
+      setIsPanning(false);
+      setDragStartPoint(null);
+      activePointerIdRef.current = null;
+      return;
+    }
+
+    if (!isPointerDown) {
+      activePointerIdRef.current = null;
+      return;
+    }
+
     setIsPointerDown(false);
+    activePointerIdRef.current = null;
+    try {
+      containerRef.current?.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    const pts = [...draftPointsRef.current];
+    draftPointsRef.current = [];
+    if (draftPathRef.current) {
+      draftPathRef.current.setAttribute('d', '');
+    }
 
     // Smart Drawing Recognition on Pen or Smart Shapes
     const isSmartMode = activeTool === 'smart-shape' || (activeTool === 'pen' && isSmartDrawingEnabled);
-    if (isSmartMode && draftPoints.length > 3) {
-      const recognized = recognizeDrawnShape(draftPoints);
+    if (isSmartMode && pts.length > 3) {
+      const recognized = recognizeDrawnShape(pts);
       if (recognized) {
         const snapX = isGridSnapEnabled ? Math.round(recognized.x / 20) * 20 : recognized.x;
         const snapY = isGridSnapEnabled ? Math.round(recognized.y / 20) * 20 : recognized.y;
@@ -368,13 +441,12 @@ export const Canvas: React.FC = () => {
           strokeStyle: 'solid',
           zIndex: 3,
         });
-        setDraftPoints([]);
         return;
       }
     }
 
     // Commit Freehand Stroke (Pen, Smart Shapes fallback, Highlighter)
-    if ((activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter') && draftPoints.length > 0) {
+    if ((activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter') && pts.length > 0) {
       const isHighlighter = activeTool === 'highlighter';
       const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
       const strokeColor = isHighlighter
@@ -384,17 +456,16 @@ export const Canvas: React.FC = () => {
       addElement({
         id: `stroke-${Date.now()}`,
         type: isHighlighter ? 'highlighter' : 'pen',
-        points: draftPoints,
+        points: pts,
         color: strokeColor,
         size: strokeSize,
         opacity: isHighlighter ? 0.55 : opacity,
-        x: draftPoints[0].x,
-        y: draftPoints[0].y,
+        x: pts[0].x,
+        y: pts[0].y,
         width: 0,
         height: 0,
         zIndex: isHighlighter ? 2 : 4,
       });
-      setDraftPoints([]);
     }
 
     // Commit Vector Shape
@@ -411,7 +482,6 @@ export const Canvas: React.FC = () => {
         height = Math.round(height / 20) * 20;
       }
 
-      // Only add if user dragged more than 5px
       if (width > 5 || height > 5) {
         addElement({
           id: `shape-${Date.now()}`,
@@ -440,6 +510,49 @@ export const Canvas: React.FC = () => {
       setDragStartPoint(null);
       setElementStartPos(null);
     }
+  };
+
+  // Pointer Cancel: Safe recovery if system gesture or palm rejection interrupts
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
+      return;
+    }
+    activePointerIdRef.current = null;
+    setIsPointerDown(false);
+    try {
+      containerRef.current?.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    const pts = [...draftPointsRef.current];
+    draftPointsRef.current = [];
+    if (draftPathRef.current) {
+      draftPathRef.current.setAttribute('d', '');
+    }
+
+    if ((activeTool === 'pen' || activeTool === 'highlighter') && pts.length > 1) {
+      const isHighlighter = activeTool === 'highlighter';
+      const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
+      const strokeColor = isHighlighter ? highlighterColor : penColor;
+      addElement({
+        id: `stroke-${Date.now()}`,
+        type: isHighlighter ? 'highlighter' : 'pen',
+        points: pts,
+        color: strokeColor,
+        size: strokeSize,
+        opacity: isHighlighter ? 0.55 : opacity,
+        x: pts[0].x,
+        y: pts[0].y,
+        width: 0,
+        height: 0,
+        zIndex: isHighlighter ? 2 : 4,
+      });
+    }
+
+    setIsDraggingElement(false);
+    setDragStartPoint(null);
+    setElementStartPos(null);
+    setShapeStartPoint(null);
+    setShapeCurrentPoint(null);
   };
 
   // Clipboard Paste Image Support
@@ -498,13 +611,6 @@ export const Canvas: React.FC = () => {
     }
   };
 
-  // Render draft path for immediate responsiveness
-  const draftPathData = draftPoints.length > 0
-    ? activeTool === 'highlighter'
-      ? renderHighlighterStroke(draftPoints, highlighterSize || 28)
-      : renderPenStroke(draftPoints, penThickness || brushSize)
-    : '';
-
   // Custom precision cursor styling
   const getCanvasCursorStyle = (): React.CSSProperties => {
     if (activeTool === 'hand' || isPanning) {
@@ -543,6 +649,7 @@ export const Canvas: React.FC = () => {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onPointerLeave={() => {
         setEraserHoverPos(null);
       }}
@@ -562,7 +669,7 @@ export const Canvas: React.FC = () => {
 
         <g
           transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}
-          className="pointer-events-auto"
+          className={activeTool === 'select' ? "pointer-events-auto" : "pointer-events-none"}
         >
           {/* Render Elements Sorted by Z-Index */}
           {[...elements]
@@ -712,29 +819,29 @@ export const Canvas: React.FC = () => {
             />
           )}
 
-          {/* Active Freehand Draft Stroke */}
-          {draftPathData && (
-            <path
-              d={draftPathData}
-              fill={
-                activeTool === 'highlighter'
-                  ? highlighterColor
-                  : isDarkCanvas && (penColor === '#1e293b' || penColor === '#0f172a' || penColor === '#000000')
-                  ? '#ffffff'
-                  : penColor
-              }
-              fillOpacity={
-                activeTool === 'highlighter'
-                  ? isDarkCanvas
-                    ? 0.65
-                    : 0.55
-                  : opacity
-              }
-              style={{
-                mixBlendMode: activeTool === 'highlighter' ? (isDarkCanvas ? 'screen' : 'multiply') : 'normal',
-              }}
-            />
-          )}
+          {/* Active Freehand Draft Stroke (High-speed hardware direct path) */}
+          <path
+            ref={draftPathRef}
+            d=""
+            fill={
+              activeTool === 'highlighter'
+                ? highlighterColor
+                : isDarkCanvas && (penColor === '#1e293b' || penColor === '#0f172a' || penColor === '#000000')
+                ? '#ffffff'
+                : penColor
+            }
+            fillOpacity={
+              activeTool === 'highlighter'
+                ? isDarkCanvas
+                  ? 0.65
+                  : 0.55
+                : opacity
+            }
+            style={{
+              mixBlendMode: activeTool === 'highlighter' ? (isDarkCanvas ? 'screen' : 'multiply') : 'normal',
+            }}
+            className="pointer-events-none"
+          />
 
           {/* Active Shape Draft Preview */}
           {shapeStartPoint && shapeCurrentPoint && (
