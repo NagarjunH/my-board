@@ -31,6 +31,7 @@ interface CanvasStoreState {
   isSmartDrawingEnabled: boolean;
   isGridSnapEnabled: boolean;
   isFocusModeEnabled: boolean;
+  isPalmRejectionEnabled: boolean;
 
   penColor: string;
   highlighterColor: string;
@@ -48,6 +49,7 @@ interface CanvasStoreState {
   toggleSmartDrawing: () => void;
   toggleGridSnap: () => void;
   toggleFocusMode: () => void;
+  togglePalmRejection: () => void;
   setOpacity: (opacity: number) => void;
   setFontFamily: (font: 'handwriting' | 'sans' | 'mono') => void;
   setFontSize: (size: number) => void;
@@ -98,6 +100,7 @@ export const useCanvasStore = create<CanvasStoreState>((set, get) => ({
   isSmartDrawingEnabled: false,
   isGridSnapEnabled: false,
   isFocusModeEnabled: false,
+  isPalmRejectionEnabled: true,
 
   setActiveTool: (activeTool) => {
     const state = get();
@@ -141,6 +144,7 @@ export const useCanvasStore = create<CanvasStoreState>((set, get) => ({
   toggleSmartDrawing: () => set((s) => ({ isSmartDrawingEnabled: !s.isSmartDrawingEnabled })),
   toggleGridSnap: () => set((s) => ({ isGridSnapEnabled: !s.isGridSnapEnabled })),
   toggleFocusMode: () => set((s) => ({ isFocusModeEnabled: !s.isFocusModeEnabled })),
+  togglePalmRejection: () => set((s) => ({ isPalmRejectionEnabled: !s.isPalmRejectionEnabled })),
   setOpacity: (opacity) => set({ opacity }),
   setFontFamily: (fontFamily) => set({ fontFamily }),
   setFontSize: (fontSize) => set({ fontSize }),

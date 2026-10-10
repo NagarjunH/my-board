@@ -36,6 +36,7 @@ export const Canvas: React.FC = () => {
   const eraserSize = useCanvasStore((s) => s.eraserSize);
   const isSmartDrawingEnabled = useCanvasStore((s) => s.isSmartDrawingEnabled);
   const isGridSnapEnabled = useCanvasStore((s) => s.isGridSnapEnabled);
+  const isPalmRejectionEnabled = useCanvasStore((s) => s.isPalmRejectionEnabled);
   const opacity = useCanvasStore((s) => s.opacity);
   const strokeWidth = useCanvasStore((s) => s.strokeWidth);
   const background = useCanvasStore((s) => s.background);
@@ -66,7 +67,10 @@ export const Canvas: React.FC = () => {
 
   // Stylus Palm Rejection & Active Pointer Tracking
   const activePointerIdRef = useRef<number | null>(null);
+  const activePointerTypeRef = useRef<string | null>(null);
+  const hasSeenPenDeviceRef = useRef<boolean>(false);
   const lastPenTimeRef = useRef<number>(0);
+  const rafDraftIdRef = useRef<number | null>(null);
 
   // High-performance draft path refs for zero-latency 120fps handwriting
   const draftPointsRef = useRef<Point[]>([]);
@@ -157,6 +161,9 @@ export const Canvas: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      if (rafDraftIdRef.current !== null) {
+        cancelAnimationFrame(rafDraftIdRef.current);
+      }
     };
   }, []);
 
@@ -168,7 +175,24 @@ export const Canvas: React.FC = () => {
     }
 
     if (e.pointerType === 'pen') {
+      hasSeenPenDeviceRef.current = true;
       lastPenTimeRef.current = Date.now();
+
+      // Stylus Preemption: If a touch contact (palm landing 50ms before stylus) was active,
+      // immediately cancel and discard the touch so the stylus takes over seamlessly!
+      if (activePointerIdRef.current !== null && activePointerTypeRef.current === 'touch') {
+        if (rafDraftIdRef.current !== null) {
+          cancelAnimationFrame(rafDraftIdRef.current);
+          rafDraftIdRef.current = null;
+        }
+        draftPointsRef.current = [];
+        if (draftPathRef.current) draftPathRef.current.setAttribute('d', '');
+        try {
+          containerRef.current?.releasePointerCapture?.(activePointerIdRef.current);
+        } catch {}
+        activePointerIdRef.current = null;
+        activePointerTypeRef.current = null;
+      }
     }
 
     // 1. Palm Rejection: If an active pointer is already drawing, reject any secondary contact (palm touch)
@@ -178,11 +202,12 @@ export const Canvas: React.FC = () => {
     }
 
     // 2. Stylus Priority Palm Rejection:
-    // When using a stylus, the palm constantly rests on screen. Reject touch contacts within 1500ms of pen activity or large palm patches.
-    if (e.pointerType === 'touch') {
-      const isPenRecentlyActive = Date.now() - lastPenTimeRef.current < 1500;
-      const isPalmSurface = (e.width && e.width > 22) || (e.height && e.height > 22);
-      if ((isPenRecentlyActive || isPalmSurface) && (activeTool === 'pen' || activeTool === 'highlighter')) {
+    // When using a stylus, the palm constantly rests on screen.
+    // Reject touch contacts if palm rejection is enabled and a stylus was recently active (15s) or large palm surface detected.
+    if (e.pointerType === 'touch' && isPalmRejectionEnabled) {
+      const isPenRecentlyActive = hasSeenPenDeviceRef.current && (Date.now() - lastPenTimeRef.current < 15000);
+      const isPalmSurface = (e.width && e.width > 16) || (e.height && e.height > 16);
+      if ((isPenRecentlyActive || isPalmSurface) && (activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter')) {
         e.preventDefault();
         return;
       }
@@ -205,6 +230,7 @@ export const Canvas: React.FC = () => {
 
     if (isHardwareEraser) {
       activePointerIdRef.current = e.pointerId;
+      activePointerTypeRef.current = e.pointerType;
       containerRef.current?.setPointerCapture?.(e.pointerId);
       setIsPointerDown(true);
       setEraserHoverPos(worldPoint);
@@ -215,6 +241,7 @@ export const Canvas: React.FC = () => {
     if (e.button !== 0) return;
 
     activePointerIdRef.current = e.pointerId;
+    activePointerTypeRef.current = e.pointerType;
     containerRef.current?.setPointerCapture?.(e.pointerId);
     setIsPointerDown(true);
 
@@ -244,8 +271,8 @@ export const Canvas: React.FC = () => {
       const isHighlighter = activeTool === 'highlighter';
       const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
       const initialPath = isHighlighter
-        ? renderHighlighterStroke([worldPoint], strokeSize)
-        : renderPenStroke([worldPoint], strokeSize);
+        ? renderHighlighterStroke([worldPoint], strokeSize, false)
+        : renderPenStroke([worldPoint], strokeSize, false);
 
       if (draftPathRef.current) {
         draftPathRef.current.setAttribute('d', initialPath);
@@ -296,6 +323,7 @@ export const Canvas: React.FC = () => {
     }
 
     if (e.pointerType === 'pen') {
+      hasSeenPenDeviceRef.current = true;
       lastPenTimeRef.current = Date.now();
     }
 
@@ -339,7 +367,7 @@ export const Canvas: React.FC = () => {
 
     if (!isPointerDown) return;
 
-    // Freehand drawing with zero-latency sub-millisecond tablet tracking
+    // Freehand drawing with zero-latency sub-millisecond tablet tracking + RAF batching
     if (activeTool === 'pen' || activeTool === 'smart-shape' || activeTool === 'highlighter') {
       const nativeEvent = e.nativeEvent as any;
       const rawEvents = (nativeEvent && typeof nativeEvent.getCoalescedEvents === 'function')
@@ -352,14 +380,19 @@ export const Canvas: React.FC = () => {
         draftPointsRef.current.push(pt);
       }
 
-      const isHighlighter = activeTool === 'highlighter';
-      const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
-      const updatedPath = isHighlighter
-        ? renderHighlighterStroke(draftPointsRef.current, strokeSize)
-        : renderPenStroke(draftPointsRef.current, strokeSize);
+      // Throttle SVG path generation to display refresh frame (60Hz / 120Hz)
+      if (rafDraftIdRef.current === null) {
+        rafDraftIdRef.current = requestAnimationFrame(() => {
+          rafDraftIdRef.current = null;
+          if (!draftPathRef.current || draftPointsRef.current.length === 0) return;
+          const isHighlighter = activeTool === 'highlighter';
+          const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
+          const updatedPath = isHighlighter
+            ? renderHighlighterStroke(draftPointsRef.current, strokeSize, false)
+            : renderPenStroke(draftPointsRef.current, strokeSize, false);
 
-      if (draftPathRef.current) {
-        draftPathRef.current.setAttribute('d', updatedPath);
+          draftPathRef.current.setAttribute('d', updatedPath);
+        });
       }
       return;
     }
@@ -397,20 +430,28 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    if (rafDraftIdRef.current !== null) {
+      cancelAnimationFrame(rafDraftIdRef.current);
+      rafDraftIdRef.current = null;
+    }
+
     if (isPanning) {
       setIsPanning(false);
       setDragStartPoint(null);
       activePointerIdRef.current = null;
+      activePointerTypeRef.current = null;
       return;
     }
 
     if (!isPointerDown) {
       activePointerIdRef.current = null;
+      activePointerTypeRef.current = null;
       return;
     }
 
     setIsPointerDown(false);
     activePointerIdRef.current = null;
+    activePointerTypeRef.current = null;
     try {
       containerRef.current?.releasePointerCapture?.(e.pointerId);
     } catch {}
@@ -517,35 +558,21 @@ export const Canvas: React.FC = () => {
     if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
       return;
     }
+    if (rafDraftIdRef.current !== null) {
+      cancelAnimationFrame(rafDraftIdRef.current);
+      rafDraftIdRef.current = null;
+    }
     activePointerIdRef.current = null;
+    activePointerTypeRef.current = null;
     setIsPointerDown(false);
     try {
       containerRef.current?.releasePointerCapture?.(e.pointerId);
     } catch {}
 
-    const pts = [...draftPointsRef.current];
+    // Discard any draft points on cancel - DO NOT commit accidental palm touch strokes
     draftPointsRef.current = [];
     if (draftPathRef.current) {
       draftPathRef.current.setAttribute('d', '');
-    }
-
-    if ((activeTool === 'pen' || activeTool === 'highlighter') && pts.length > 1) {
-      const isHighlighter = activeTool === 'highlighter';
-      const strokeSize = isHighlighter ? (highlighterSize || 28) : (penThickness || brushSize || 4);
-      const strokeColor = isHighlighter ? highlighterColor : penColor;
-      addElement({
-        id: `stroke-${Date.now()}`,
-        type: isHighlighter ? 'highlighter' : 'pen',
-        points: pts,
-        color: strokeColor,
-        size: strokeSize,
-        opacity: isHighlighter ? 0.55 : opacity,
-        x: pts[0].x,
-        y: pts[0].y,
-        width: 0,
-        height: 0,
-        zIndex: isHighlighter ? 2 : 4,
-      });
     }
 
     setIsDraggingElement(false);

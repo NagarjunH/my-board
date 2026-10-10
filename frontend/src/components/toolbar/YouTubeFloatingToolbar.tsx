@@ -86,6 +86,8 @@ export const YouTubeFloatingToolbar: React.FC = () => {
   const setPenThickness = useCanvasStore((s) => s.setPenThickness);
   const highlighterSize = useCanvasStore((s) => s.highlighterSize);
   const setHighlighterSize = useCanvasStore((s) => s.setHighlighterSize);
+  const isPalmRejectionEnabled = useCanvasStore((s) => s.isPalmRejectionEnabled);
+  const togglePalmRejection = useCanvasStore((s) => s.togglePalmRejection);
   const background = useCanvasStore((s) => s.background);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
@@ -560,6 +562,24 @@ export const YouTubeFloatingToolbar: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Hardware Palm Rejection Toggle */}
+          <div className="pt-2 mt-2 border-t border-slate-800/80 flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[11px] font-medium text-slate-300">Palm Rejection</span>
+              <span className="text-[9px] text-slate-500">Stylus Priority Protection</span>
+            </div>
+            <button
+              onClick={togglePalmRejection}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
+                isPalmRejectionEnabled
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                  : 'bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              {isPalmRejectionEnabled ? 'ACTIVE' : 'OFF'}
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -18,6 +18,7 @@ import {
   Clock,
   BookOpen,
   Presentation,
+  ShieldCheck,
 } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useUIStore } from '../../store/uiStore';
@@ -69,6 +70,8 @@ export const Toolbar: React.FC = () => {
   const setEraserSize = useCanvasStore((s) => s.setEraserSize);
   const isGridSnapEnabled = useCanvasStore((s) => s.isGridSnapEnabled);
   const toggleGridSnap = useCanvasStore((s) => s.toggleGridSnap);
+  const isPalmRejectionEnabled = useCanvasStore((s) => s.isPalmRejectionEnabled);
+  const togglePalmRejection = useCanvasStore((s) => s.togglePalmRejection);
 
   // Custom Pen Thickness text input state
   const [thicknessInput, setThicknessInput] = useState<string>(penThickness.toString());
@@ -386,6 +389,20 @@ export const Toolbar: React.FC = () => {
                   </button>
                 ))}
               </div>
+
+              {/* Palm Guard Rejection Button */}
+              <button
+                onClick={togglePalmRejection}
+                className={`h-6 px-2 rounded-md text-[10px] font-semibold transition-all border flex items-center gap-1 ${
+                  isPalmRejectionEnabled
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-700/50'
+                    : 'bg-slate-100 text-slate-500 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                }`}
+                title="Hardware Stylus Palm Rejection (Prevents accidental palm touch smudges while writing)"
+              >
+                <ShieldCheck className="w-3 h-3" />
+                <span>Palm Guard: {isPalmRejectionEnabled ? 'ON' : 'OFF'}</span>
+              </button>
             </div>
           )}
 
